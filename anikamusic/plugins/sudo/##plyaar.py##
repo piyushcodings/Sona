@@ -1,0 +1,214 @@
+import asyncio
+import aiohttp
+from pyrogram import filters
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from anikamusic import app
+from anikamusic.misc import mongodb, SUDOERS
+import config
+
+# --- DATABASE SETUP ---
+theme_db = mongodb["player_themes"]
+watermark_db = mongodb["player_watermark"]
+
+# --- SETUP STATES DICTIONARY ---
+# Format: { (chat_id, user_id): {"step": 1, "pic": "", "code": "", "warn": ""} }
+setup_states = {}
+
+# --- DEFAULTS ---
+DEFAULT_WATERMARK = "𝐒 𝛖 𝐝 ֟፝ᥱ 𝛆 𝛒"
+DEFAULT_PIC = "https://files.catbox.moe/eje8y8.jpeg"
+DEFAULT_THEME = "<emoji id='5375434433195164090'>✨</emoji><emoji id='5375060461802770475'>✨</emoji><emoji id='5375278220939645551'>✨</emoji><emoji id='5375520985376113379'>✨</emoji><emoji id='5375418387197350395'>✨</emoji><emoji id='5375585543029540355'>✨</emoji><emoji id='5375280149379958356'>✨</emoji>\n<blockquote><b><emoji id='5999063078983964465'>🎧</emoji> Sᴛᴀʀᴛᴇᴅ Sᴛʀᴇᴀᴍɪɴɢ <emoji id='5999063078983964465'>🎧</emoji></b></blockquote>\n<blockquote><b><emoji id='6001533441093408240'>🎵</emoji> ᴛɪᴛʟᴇ:</b> <a href='{0}'>{1}</a></blockquote>\n<blockquote><b><emoji id='6001056411960744238'>⏱</emoji> ᴅᴜʀᴀᴛɪᴏɴ:</b> {2}</blockquote>\n<blockquote expandable><b><emoji id='6001522720855037558'>👤</emoji> ʀᴇǫᴜᴇsᴛᴇᴅ ʙʏ :</b> {3}\n\nㅤ\n\n<b><emoji id='5999210495146465994'>🔥</emoji> ✦ᴘᴏᴡєʀєᴅ ʙʏ » {4} <emoji id='5999210495146465994'>🔥</emoji></b></blockquote>\n<emoji id='5375434433195164090'>✨</emoji><emoji id='5375060461802770475'>✨</emoji><emoji id='5375278220939645551'>✨</emoji><emoji id='5375520985376113379'>✨</emoji><emoji id='5375418387197350395'>✨</emoji><emoji id='5375585543029540355'>✨</emoji><emoji id='5375280149379958356'>✨</emoji>"
+
+# --- HELPER FUNCTIONS ---
+def smallcaps(text):
+    chars = {'a': 'ᴀ', 'b': 'ʙ', 'c': 'ᴄ', 'd': 'ᴅ', 'e': 'ᴇ', 'f': 'ғ', 'g': 'ɢ', 'h': 'ʜ', 'i': 'ɪ', 'j': 'ᴊ', 'k': 'ᴋ', 'l': 'ʟ', 'm': 'ᴍ', 'n': 'ɴ', 'o': 'ᴏ', 'p': 'ᴘ', 'q': 'ǫ', 'r': 'ʀ', 's': 's', 't': 'ᴛ', 'u': 'ᴜ', 'v': 'ᴠ', 'w': 'ᴡ', 'x': 'x', 'y': 'ʏ', 'z': 'ᴢ', 'A': 'ᴀ', 'B': 'ʙ', 'C': 'ᴄ', 'D': 'ᴅ', 'E': 'ᴇ', 'F': 'ғ', 'G': 'ɢ', 'H': 'ʜ', 'I': 'ɪ', 'J': 'ᴊ', 'K': 'ᴋ', 'L': 'ʟ', 'M': 'ᴍ', 'N': 'ɴ', 'O': 'ᴏ', 'P': 'ᴘ', 'Q': 'ǫ', 'R': 'ʀ', 'S': 's', 'T': 'ᴛ', 'U': 'ᴜ', 'V': 'ᴠ', 'W': 'ᴡ', 'X': 'x', 'Y': 'ʏ', 'Z': 'ᴢ'}
+    return ''.join(chars.get(c, c) for c in str(text))
+
+def get_raw_markup(markup):
+    if hasattr(markup, 'inline_keyboard'):
+        raw_kb = []
+        for row in markup.inline_keyboard:
+            raw_row = []
+            for btn in row:
+                raw_btn = {"text": btn.text}
+                if btn.callback_data: raw_btn["callback_data"] = btn.callback_data
+                if btn.url: raw_btn["url"] = btn.url
+                raw_row.append(raw_btn)
+            raw_kb.append(raw_row)
+        return raw_kb
+    return markup
+
+async def inject_premium_markup(chat_id, message_id, markup):
+    try:
+        markup = get_raw_markup(markup)
+        token = getattr(config, "BOT_TOKEN", getattr(app, "bot_token", None))
+        url = f"https://api.telegram.org/bot{token}/editMessageReplyMarkup"
+        payload = {"chat_id": chat_id, "message_id": message_id, "reply_markup": {"inline_keyboard": markup}}
+        async with aiohttp.ClientSession() as session:
+            await session.post(url, json=payload)
+    except Exception as e:
+        pass
+
+async def get_watermark():
+    data = await watermark_db.find_one({"type": "current"})
+    return data["text"] if data else DEFAULT_WATERMARK
+
+async def get_active_theme():
+    data = await theme_db.find_one({"type": "active"})
+    return data if data else {"text": DEFAULT_THEME, "pic": DEFAULT_PIC, "warn": ""}
+
+# --- COMMANDS ---
+
+# 1. SET WATERMARK
+@app.on_message(filters.command(["setwatermark", "watermark"], prefixes=["/", ".", "!"]) & filters.user(list(SUDOERS)))
+async def set_watermark_cmd(client, message: Message):
+    if len(message.command) < 2:
+        return await message.reply(f"<emoji id='5999100917645841519'>⚠️</emoji> {smallcaps('Please provide the watermark text!')}\n**Example:** `.setwatermark 𝐒 𝛖 𝐝 ֟፝ᥱ 𝛆 𝛒`")
+    
+    new_watermark = message.text.split(None, 1)[1]
+    await watermark_db.update_one({"type": "current"}, {"$set": {"text": new_watermark}}, upsert=True)
+    await message.reply(f"<emoji id='6001132493011425597'>✅</emoji> **{smallcaps('Watermark Updated Successfully!')}**\n\n<blockquote>**{smallcaps('New Watermark:')}** `{new_watermark}`</blockquote>")
+
+# 2. REMOVE CUSTOM THEME
+@app.on_message(filters.command(["removeplyar", "delplyar", "rmplyar"], prefixes=["/", ".", "!"]) & filters.user(list(SUDOERS)))
+async def remove_player_cmd(client, message: Message):
+    await theme_db.delete_one({"type": "active"})
+    await message.reply(f"<emoji id='5999210495146465994'>🗑</emoji> **{smallcaps('Custom Player Theme Removed!')}**\n\n<blockquote>{smallcaps('The bot has successfully reverted to the default YukkiMusic stream design.')}</blockquote>")
+
+# 3. INTERACTIVE SETUP INITIATOR (.setplyar)
+@app.on_message(filters.command(["setplyar", "plyarset"], prefixes=["/", ".", "!"]) & filters.user(list(SUDOERS)))
+async def start_interactive_setup(client, message: Message):
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    setup_states[(chat_id, user_id)] = {"step": 1, "pic": "", "code": "", "warn": ""}
+    
+    text = (
+        f"<emoji id='5999063078983964465'>🎨</emoji> **{smallcaps('Player Theme Setup Started')}**\n\n"
+        f"<blockquote>{smallcaps('Step 1: Please send me the Catbox URL (or any direct image/video link) for your player background.')}</blockquote>\n\n"
+        f"*(Type `.cancel` anytime to stop the setup)*"
+    )
+    await message.reply(text)
+
+# 4. CANCEL SETUP
+@app.on_message(filters.command(["cancel"], prefixes=["/", ".", "!"]) & filters.user(list(SUDOERS)))
+async def cancel_setup(client, message: Message):
+    key = (message.chat.id, message.from_user.id)
+    if key in setup_states:
+        del setup_states[key]
+        await message.reply(f"<emoji id='5999100917645841519'>❌</emoji> **{smallcaps('Player setup cancelled.')}**")
+
+# 5. STATE MACHINE (Handles the step-by-step replies)
+@app.on_message(filters.text & filters.user(list(SUDOERS)), group=10)
+async def handle_setup_steps(client, message: Message):
+    key = (message.chat.id, message.from_user.id)
+    
+    # Check if user is in setup mode and not typing a command
+    if key not in setup_states or message.text.startswith(("/", ".", "!")):
+        return
+        
+    state = setup_states[key]
+    step = state["step"]
+    
+    if step == 1:
+        state["pic"] = message.text.strip()
+        state["step"] = 2
+        text = (
+            f"<emoji id='6001533441093408240'>📝</emoji> **{smallcaps('Step 1 Complete!')}**\n\n"
+            f"<blockquote>{smallcaps('Step 2: Now send me the HTML format code for the player.')}\n\n"
+            f"{smallcaps('Use these variables in your code:')}\n"
+            f"`{{0}}` - {smallcaps('Song Link')}\n"
+            f"`{{1}}` - {smallcaps('Song Title')}\n"
+            f"`{{2}}` - {smallcaps('Duration')}\n"
+            f"`{{3}}` - {smallcaps('Requested By')}\n"
+            f"`{{4}}` - {smallcaps('Watermark')}</blockquote>"
+        )
+        await message.reply(text)
+        
+    elif step == 2:
+        state["code"] = message.text.strip()
+        state["step"] = 3
+        text = (
+            f"<emoji id='5375434433195164090'>✨</emoji> **{smallcaps('Step 2 Complete!')}**\n\n"
+            f"<blockquote>{smallcaps('Step 3: Finally, send the Premium Warning or Description text you want to show below the player.')}\n\n"
+            f"*(If you do not want a warning, simply reply with `skip`)*</blockquote>"
+        )
+        await message.reply(text)
+        
+    elif step == 3:
+        warn_text = message.text.strip()
+        if warn_text.lower() == 'skip':
+            warn_text = ""
+            
+        # Save to database
+        await theme_db.update_one(
+            {"type": "active"}, 
+            {"$set": {"text": state["code"], "pic": state["pic"], "warn": warn_text}}, 
+            upsert=True
+        )
+        
+        # Clear state
+        del setup_states[key]
+        
+        success_text = f"<emoji id='6001132493011425597'>🎉</emoji> **{smallcaps('Theme Successfully Saved!')}**\n\n<blockquote>{smallcaps('Your new player design has been applied instantly. Zero restart required. Type `.editplyar` to preview it.')}</blockquote>"
+        await message.reply(success_text)
+
+# 6. THEME VIEWER (.editplyar)
+@app.on_message(filters.command(["editplyar", "plyaredit"], prefixes=["/", ".", "!"]) & filters.user(list(SUDOERS)))
+async def view_player_theme(client, message: Message):
+    theme = await get_active_theme()
+    watermark = await get_watermark()
+    
+    # Dummy data for preview
+    try:
+        preview_text = theme["text"].format(
+            "https://t.me/hehe_stalker", 
+            "Dummy Song Title Preview", 
+            "03:45", 
+            message.from_user.mention, 
+            watermark
+        )
+    except Exception as e:
+        preview_text = f"<emoji id='5999100917645841519'>⚠️</emoji> **{smallcaps('Formatting Error in your Theme Code!')}**\n\n{str(e)}"
+
+    if theme["warn"]:
+        preview_text += f"\n\n<blockquote><emoji id='5999210495146465994'>⚠️</emoji> **{smallcaps('Premium Notice:')}**\n{theme['warn']}</blockquote>"
+        
+    markup = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(f"💧 {smallcaps('Set Watermark')}", switch_inline_query_current_chat=".setwatermark "),
+            InlineKeyboardButton(f"🎨 {smallcaps('New Theme')}", callback_data="btn_new_theme")
+        ],
+        [
+            InlineKeyboardButton(f"🗑 {smallcaps('Remove Theme')}", callback_data="btn_rm_theme"),
+            InlineKeyboardButton(f"❌ {smallcaps('Close')}", callback_data="btn_close_panel")
+        ]
+    ])
+    
+    header = f"<emoji id='6080202089311507876'>😎</emoji> **{smallcaps('Current Player Theme Preview')}**\n\n"
+    
+    run = await message.reply_photo(
+        photo=theme["pic"], 
+        caption=header + preview_text, 
+    )
+    await inject_premium_markup(message.chat.id, run.id, markup)
+
+# Callback queries for the preview panel buttons
+@app.on_callback_query(filters.regex("^(btn_new_theme|btn_rm_theme|btn_close_panel)$"))
+async def theme_panel_callbacks(client, cq):
+    if cq.data == "btn_close_panel":
+        await cq.message.delete()
+    
+    elif cq.data == "btn_new_theme":
+        await cq.message.delete()
+        # Trigger the setup command logic directly
+        user_id = cq.from_user.id
+        chat_id = cq.message.chat.id
+        setup_states[(chat_id, user_id)] = {"step": 1, "pic": "", "code": "", "warn": ""}
+        text = f"<emoji id='5999063078983964465'>🎨</emoji> **{smallcaps('Player Theme Setup Started')}**\n\n<blockquote>{smallcaps('Step 1: Please send me the Catbox URL for your player background.')}</blockquote>\n\n*(Type `.cancel` anytime to stop)*"
+        await client.send_message(chat_id, text)
+        
+    elif cq.data == "btn_rm_theme":
+        await theme_db.delete_one({"type": "active"})
+        await cq.answer("Custom theme removed! Reverted to default.", show_alert=True)
+        await cq.message.delete()
+      
