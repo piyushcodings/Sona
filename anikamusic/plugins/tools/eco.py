@@ -330,17 +330,16 @@ async def protect_user_cmd(client, message: Message):
 # ==========================================
 #              KILL & ROB SYSTEM
 # ==========================================
-
 @app.on_message(filters.command(["kill", "rob"], prefixes=["/", ".", "!"]) & filters.group)
 async def rob_or_kill_user(client, message: Message):
     chat_id = message.chat.id
     if not await is_eco_enabled(chat_id): return
     
     robber_user = message.from_user
-    robber_data = await game_db.find_one({"user_id": robber_user.id})
-    
-    # --- CHECK IF DAILY BONUS IS CLAIMED RECENTLY ---
-    last_daily = robber_data.get("last_daily", 0) if robber_data else 0
+    robber_data = await game_db.find_one({"user_id": robber_user.id}) or {}
+
+    # --- DAILY CHECK ---
+    last_daily = robber_data.get("last_daily", 0)
     if time.time() - last_daily >= 86400:
         claim_msg = "⚠️ " + smallcaps("You haven't claimed your daily bonus yet! First claim it to perform an attack.")
         markup = InlineKeyboardMarkup([
@@ -348,81 +347,136 @@ async def rob_or_kill_user(client, message: Message):
         ])
         return await message.reply_text(claim_msg, reply_markup=markup)
 
+    # --- REPLY CHECK ---
     if not message.reply_to_message or not message.reply_to_message.from_user:
         return await message.reply_text("⚠️ Reply to a user's message to kill/rob them!")
-        
+
     target_user = message.reply_to_message.from_user
-    
+
     if target_user.id == robber_user.id:
         return await message.reply_text("⚠️ You can't attack yourself!")
     if target_user.is_bot:
         return await message.reply_text("⚠️ You can't attack bots!")
-        
-    # Check Attacker State
-    robber_dead = robber_data.get("dead_until", 0) if robber_data else 0
-    robber_kills = robber_data.get("kills", 0) if robber_data else 0
-    
-    if time.time() < robber_dead:
-        return await message.reply_text("👻 **You are dead!** You can't attack anyone right now. Use `/revive` or wait.")
 
-    # Determine command
+    # --- COOLDOWN (ANTI-SPAM) ---
+    last_attack = robber_data.get("last_attack", 0)
+    if time.time() - last_attack < 30:
+        return await message.reply_text("⏳ Wait 30s before attacking again!")
+
+    # --- ATTACKER STATE ---
+    robber_dead = robber_data.get("dead_until", 0)
+    robber_kills = robber_data.get("kills", 0)
+
+    if time.time() < robber_dead:
+        return await message.reply_text("👻 You are dead! Use `/revive` first.")
+
     cmd = message.command[0].lower()
 
-    # ROB UNLOCK REQUIREMENT (16 KILLS)
-    if cmd == "rob":
-        if robber_kills < 16:
-            return await message.reply_text(f"🔒 **Rob Feature Locked!**\nYou need at least **16 kills** to unlock `/rob`.\n*(Current Kills: {robber_kills})*")
+    # --- ROB UNLOCK ---
+    if cmd == "rob" and robber_kills < 2:
+        return await message.reply_text(
+            f"🔒 Rob Locked!\nNeed **2 kills** (You: {robber_kills})"
+        )
 
-    # Check Target State
-    target_data = await game_db.find_one({"user_id": target_user.id})
-    target_prot = target_data.get("protected_until", 0) if target_data else 0
-    target_dead = target_data.get("dead_until", 0) if target_data else 0
-    
+    # --- TARGET DATA ---
+    target_data = await game_db.find_one({"user_id": target_user.id}) or {}
+
+    target_prot = target_data.get("protected_until", 0)
+    target_dead = target_data.get("dead_until", 0)
+    target_bal = target_data.get("points", 0)
+
     if time.time() < target_dead:
-        return await message.reply_text(f"💀 {smallcaps(target_user.first_name)} is already dead! Wait for their auto-revive.")
-        
+        return await message.reply_text(f"💀 {smallcaps(target_user.first_name)} is already dead!")
+
     if time.time() < target_prot:
-        return await message.reply_text(f"🛡️ {smallcaps(target_user.first_name)} is currently protected by a magical shield!")
-        
-    target_bal = target_data.get("points", 0) if target_data else 0
-    
-    amount_to_rob = 0
-    
+        return await message.reply_text(f"🛡️ {smallcaps(target_user.first_name)} is protected!")
+
+    # =========================
+    # 💰 ROB LOGIC
+    # =========================
     if cmd == "rob":
+        if target_bal <= 0:
+            return await message.reply_text(f"⚠️ {smallcaps(target_user.first_name)} is already broke!")
+
         if len(message.command) < 2:
-            return await message.reply_text("⚠️ Usage: `/rob [amount]` in reply to someone.")
-        try: amount_to_rob = int(message.command[1])
-        except: return await message.reply_text("⚠️ Invalid amount!")
-        if amount_to_rob > target_bal: amount_to_rob = target_bal
-    else: # kill logic
-        amount_to_rob = random.randint(1, max(2, int(target_bal * 0.15))) # Steal up to 15%
-        
-    if amount_to_rob <= 0: amount_to_rob = 1
-        
+            return await message.reply_text("⚠️ Usage: `/rob amount`")
+
+        try:
+            amount_to_rob = int(message.command[1])
+        except:
+            return await message.reply_text("⚠️ Invalid amount!")
+
+        if amount_to_rob <= 0:
+            return await message.reply_text("⚠️ Amount must be > 0")
+
+        if amount_to_rob > target_bal:
+            amount_to_rob = target_bal
+
+    # =========================
+    # 🔪 KILL LOGIC
+    # =========================
+    else:
+        if target_bal <= 0:
+            amount_to_rob = 1  # allow kill even if broke
+        else:
+            amount_to_rob = random.randint(1, max(2, int(target_bal * 0.15)))
+
+    # =========================
+    # FINAL VALUES
+    # =========================
     total_gained = amount_to_rob
     xp_gained = 15
-    
-    # 7 Minutes = 420 seconds (Let's set dead_until)
-    death_timer = time.time() + 420 
-    
-    # Update DB
-    if cmd == "kill":
-        await game_db.update_one({"user_id": target_user.id}, {"$inc": {"points": -amount_to_rob}, "$set": {"dead_until": death_timer}}, upsert=True)
-    else:
-        await game_db.update_one({"user_id": target_user.id}, {"$inc": {"points": -amount_to_rob}}, upsert=True)
-        
-    await game_db.update_one({"user_id": robber_user.id}, {"$inc": {"points": total_gained, "kills": 1 if cmd=="kill" else 0, "xp": xp_gained}}, upsert=True)
-    
-    if cmd == "kill":
-        text = f"🔪 👤 {smallcaps(robber_user.first_name)} Kɪʟʟᴇᴅ & Rᴏʙʙᴇᴅ ${amount_to_rob} from {smallcaps(target_user.first_name)}\n"
-        text += f"💀 {smallcaps(target_user.first_name)} is now dead for 7 minutes!\n"
-    else:
-        text = f"🥷 👤 {smallcaps(robber_user.first_name)} Sɴᴇᴀᴋɪʟʏ Rᴏʙʙᴇᴅ ${amount_to_rob} from {smallcaps(target_user.first_name)}\n"
-        
-    text += f"💰 Gᴀɪɴᴇᴅ: ${total_gained}, +{xp_gained} Xᴘ"
-    
-    await message.reply_text(text)
+    death_timer = time.time() + 420  # 7 min
 
+    # --- UPDATE TARGET ---
+    if cmd == "kill":
+        await game_db.update_one(
+            {"user_id": target_user.id},
+            {
+                "$inc": {"points": -amount_to_rob},
+                "$set": {"dead_until": death_timer, "name": target_user.first_name}
+            },
+            upsert=True
+        )
+    else:
+        await game_db.update_one(
+            {"user_id": target_user.id},
+            {
+                "$inc": {"points": -amount_to_rob},
+                "$set": {"name": target_user.first_name}
+            },
+            upsert=True
+        )
+
+    # --- UPDATE ATTACKER ---
+    await game_db.update_one(
+        {"user_id": robber_user.id},
+        {
+            "$inc": {
+                "points": total_gained,
+                "kills": 1 if cmd == "kill" else 0,
+                "xp": xp_gained
+            },
+            "$set": {
+                "last_attack": time.time(),
+                "name": robber_user.first_name
+            }
+        },
+        upsert=True
+    )
+
+    # =========================
+    # OUTPUT TEXT
+    # =========================
+    if cmd == "kill":
+        text = f"🔪 {smallcaps(robber_user.first_name)} Kɪʟʟᴇᴅ & Rᴏʙʙᴇᴅ ${amount_to_rob} from {smallcaps(target_user.first_name)}\n"
+        text += f"💀 {smallcaps(target_user.first_name)} is dead for 7 min\n"
+    else:
+        text = f"🥷 {smallcaps(robber_user.first_name)} Rᴏʙʙᴇᴅ ${amount_to_rob} from {smallcaps(target_user.first_name)}\n"
+
+    text += f"💰 +${total_gained} | +{xp_gained} XP"
+
+    await message.reply_text(text)
 # ==========================================
 #              GIVE / SEND MONEY
 # ==========================================
