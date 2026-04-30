@@ -6,7 +6,7 @@ from anikamusic import app
 
 #--------------------------
 
-MUST_JOIN = "ZcziiyYY"
+MUST_JOIN = "itzpiyush007"
 #------------------------
 @app.on_message(filters.incoming & filters.private, group=-1)
 async def must_join_channel(app: Client, msg: Message):
