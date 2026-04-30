@@ -22,7 +22,7 @@ BOT_USERNAME = getenv("BOT_USERNAME" , "ImSona_Bot")
 # --------------------------------------------------------
 BOT_NAME = getenv("BOT_NAME" , "˹ 𝚂𝛐𝛈𝛂  ♪˼")
 # ---------------------------------------------------------
-ASSUSERNAME = getenv("ASSUSERNAME" , "aizollr")
+ASSUSERNAME = getenv("ASSUSERNAME" , "imsona_asst")
 # ---------------------------------------------------------
 GROQ_API_KEY="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"
 
@@ -38,10 +38,10 @@ DURATION_LIMIT_MIN = int(getenv("DURATION_LIMIT", 17000))
 # ----------------------------------------------------------------
 
 # ----------------------------------------------------------------
-LOGGER_ID = int(getenv("LOGGER_ID", -1003639584506))
+LOGGER_ID = int(getenv("LOGGER_ID", -1003935511126))
 # ----------------------------------------------------------------
 # ----------------------------------------------------------------
-OWNER_ID = int(getenv("OWNER_ID", 7372417242))
+OWNER_ID = int(getenv("OWNER_ID", 8785285858))
 # -----------------------------------------------------------------
 # -----------------------------------------------------------------
 
@@ -70,8 +70,8 @@ GIT_TOKEN = getenv(
 
 # ------------------------------------------------------------------------
 # -------------------------------------------------------------------------
-SUPPORT_CHANNEL = getenv("SUPPORT_CHANNEL", "https://t.me/+N08m5L1mCTU2NTE1")
-SUPPORT_CHAT = getenv("SUPPORT_CHAT", "https://t.me/UpsidePortal")
+SUPPORT_CHANNEL = getenv("SUPPORT_CHANNEL", "https://t.me/itzpiyush007")
+SUPPORT_CHAT = getenv("SUPPORT_CHAT", "https://t.me/+ZVRFmlrgRWw2YTBl")
 # ------------------------------------------------------------------------------
 # -------------------------------------------------------------------------------
 
@@ -117,7 +117,7 @@ TG_VIDEO_FILESIZE_LIMIT = int(getenv("TG_VIDEO_FILESIZE_LIMIT", "5242880000"))
 # ------------------------------------
 # ------------------------------------
 # ------------------------------------
-STRING1 = getenv("STRING_SESSION", "BQGV228AnXNo28JZUA8Gj_U2NXX7Gf-D7v0wBMBtAVmfm4tchpWtUbg5XaAJqLKMPSVOEseufFuzFrbH3IIit5_IJL997Z_1UUgnAu50mSjHcuDhBLEc1r3Q8T8J506_io6JyLF1ElpuU0jer8QswWQAn2Lp4IGHM0VCaDsSserjVoh1HKwfWQnr3oWnr919gnmRwyDU8TlazWYrcT7MhtMBOLVIn7YOSZsLfMdFu-v0lrujxGWkp48zdTAonetevCBVWbkSetWnRKROhZWUh6ItGtFk5d75uWmtO1LAP_kKlz9wxc-9nsBYrUiDmv4OtSheB8ma_Ag2PKFa9uYZagsdiOhyjAAAAAGwUnlsAA")
+STRING1 = getenv("STRING_SESSION", "")
 STRING2 = getenv("STRING_SESSION2", None)
 STRING3 = getenv("STRING_SESSION3", None)
 STRING4 = getenv("STRING_SESSION4", None)
