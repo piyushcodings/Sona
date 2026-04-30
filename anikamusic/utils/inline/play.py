@@ -73,7 +73,7 @@ def stream_markup_timer(_, chat_id, played, dur):
         ],
         [
             # Mimi Tunes & Home
-            api_btn(text="  ᴛᴜɴᴇs˼♪", url="http://t.me/IAM_MIMBOT", style="primary", custom_emoji_id="6334333036473091884"),
+            api_btn(text="  ᴛᴜɴᴇs˼♪", url="http://t.me/Im_SonaBot", style="primary", custom_emoji_id="6334333036473091884"),
             api_btn(text="ʜᴏᴍᴇ", url=config.SUPPORT_CHAT, style="primary", custom_emoji_id="6334648089504122382"),
         ],
         [
@@ -96,7 +96,7 @@ def stream_markup(_, chat_id):
             api_btn(text=" ", callback_data=f"ADMIN Stop|{chat_id}", style="danger", custom_emoji_id="5409042015415448331"), 
         ],
         [
-            api_btn(text="˹  ᴛᴜɴᴇs˼♪", url="http://t.me/IAM_MIMBOT", style="primary", custom_emoji_id="6334333036473091884"),
+            api_btn(text="˹  ᴛᴜɴᴇs˼♪", url="http://t.me/Im_SonaBot", style="primary", custom_emoji_id="6334333036473091884"),
             api_btn(text="ʜᴏᴍᴇ", url=config.SUPPORT_CHAT, style="primary", custom_emoji_id="6334648089504122382"),
         ],
         [
