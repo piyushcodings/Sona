@@ -108,7 +108,7 @@ asyncio.create_task(auto_replenish_loop())
 #              ECO LEADERBOARD
 # ==========================================
 
-@app.on_message(filters.command(["ecorank", "ecousers"], prefixes=["/", ".", "!"]) & filters.group)
+@app.on_message(filters.command(["ecorank", "ecousers","topusers"], prefixes=["/", ".", "!"]) & filters.group)
 async def eco_rankings(client, message: Message):
     chat_id = message.chat.id
     if not await is_eco_enabled(chat_id): return
@@ -152,8 +152,34 @@ async def eco_rankings(client, message: Message):
     await message.reply_text(text)
 
 # ==========================================
-#              DAILY REWARDS
+#              DAILY REWARDS & TOP KILLS 
 # ==========================================
+@app.on_message(filters.command(["topkill"], prefixes=["/", ".", "!"]) & filters.group)
+async def top_killers(client, message: Message):
+    chat_id = message.chat.id
+    if not await is_eco_enabled(chat_id): return
+
+    try: await message.delete()
+    except: pass
+
+    text = "⚔️ **Tᴏᴘ 10 Kɪʟʟᴇʀꜱ:**\n\n"
+    
+    users = game_db.find({"kills": {"$gt": 0}}).sort("kills", -1).limit(10)
+
+    count = 1
+    async for user in users:
+        name = user.get("name", "Unknown")[:20]
+        kills = user.get("kills", 0)
+
+        badge = "💓" if user.get("premium") else "👤"
+
+        text += f"{badge} {smallcaps(name)}: {kills}\n"
+        count += 1
+
+    text += "\n💓 = Pʀᴇᴍɪᴜᴍ • 👤 = Nᴏʀᴍᴀʟ\n"
+    text += "\n✅ Uᴘɢʀᴀᴅᴇ Tᴏ Pʀᴇᴍɪᴜᴍ : /upgrade"
+
+    await message.reply_text(text)
 
 @app.on_message(filters.command(["daily"], prefixes=["/", ".", "!"]) & filters.group)
 async def claim_daily(client, message: Message):
@@ -180,7 +206,54 @@ async def claim_daily(client, message: Message):
     )
     
     await message.reply_text(f"🎁 **{smallcaps('Daily Reward Claimed!')}**\n\n👤 {message.from_user.mention} received **$1000**! Come back tomorrow for more.")
+# ==========================================
+#              UPGRADE SYSTEM
+# ==========================================
+@app.on_message(filters.command(["upgrade"], prefixes=["/", ".", "!"]) & filters.group)
+async def upgrade_status(client, message: Message):
+    chat_id = message.chat.id
+    if not await is_eco_enabled(chat_id): return
 
+    user = message.from_user
+    user_id = user.id
+
+    data = await game_db.find_one({"user_id": user_id}) or {}
+
+    points = data.get("points", 0)
+    kills = data.get("kills", 0)
+    premium = data.get("premium", False)
+
+    REQUIRED_MONEY = 100000
+    REQUIRED_KILLS = 60
+
+    # ✅ Already Premium
+    if premium:
+        return await message.reply_text(
+            f"💓 {smallcaps('You Already Have Premium Access!')}"
+        )
+
+    # Progress caps (so it doesn't overflow UI)
+    money_progress = min(points, REQUIRED_MONEY)
+    kill_progress = min(kills, REQUIRED_KILLS)
+
+    text = "⚠️ **Pʀᴇᴍɪᴜᴍ ᴀᴄᴄᴇꜱꜱ ʟᴏᴄᴋᴇᴅ**\n\n"
+    text += f"💰 Pʀᴏɢʀᴇꜱꜱ: {money_progress}/{REQUIRED_MONEY}\n"
+    text += f"⚔️ Kɪʟʟꜱ: {kill_progress}/{REQUIRED_KILLS}\n\n"
+
+    # Check if completed
+    if points >= REQUIRED_MONEY and kills >= REQUIRED_KILLS:
+        await game_db.update_one(
+            {"user_id": user_id},
+            {"$set": {"premium": True}},
+            upsert=True
+        )
+
+        text += f"🎉 {smallcaps('Congratulations! Premium Unlocked!')}"
+    else:
+        text += "⏳ Cᴏᴍᴘʟᴇᴛᴇ ᴛᴏᴅᴀʏ'ꜱ ᴛᴀʀɢᴇᴛꜱ ᴛᴏ ᴜɴʟᴏᴄᴋ ᴀᴄᴄᴇꜱꜱ\n\n"
+        text += "Kᴇᴇᴘ ᴘʀᴏɢʀᴇꜱꜱɪɴɢ ᴛᴏ ᴜɴʟᴏᴄᴋ Pʀᴇᴍɪᴜᴍ ᴀᴄᴄᴇꜱꜱ"
+
+    await message.reply_text(text)
 # ==========================================
 #              DEATH & REVIVE SYSTEM
 # ==========================================
@@ -190,42 +263,37 @@ async def revive_user(client, message: Message):
     chat_id = message.chat.id
     if not await is_eco_enabled(chat_id): return
     
-    buyer_id = message.from_user.id
-    buyer_data = await game_db.find_one({"user_id": buyer_id})
-    buyer_bal = buyer_data.get("points", 0) if buyer_data else 0
+    user = message.from_user
+    user_id = user.id
     
-    REVIVE_COST = 200
-    
-    if buyer_bal < REVIVE_COST:
-        return await message.reply_text(f"⚠️ You need at least **${REVIVE_COST}** to buy a revive potion!")
-        
-    # Determine who to revive
-    if message.reply_to_message and message.reply_to_message.from_user:
-        target_user = message.reply_to_message.from_user
-        target_name = target_user.first_name
-        target_id = target_user.id
-    else:
-        target_user = message.from_user
-        target_name = target_user.first_name
-        target_id = target_user.id
+    data = await game_db.find_one({"user_id": user_id})
+    balance = data.get("points", 0) if data else 0
+    dead_until = data.get("dead_until", 0) if data else 0
 
-    target_data = await game_db.find_one({"user_id": target_id})
-    dead_until = target_data.get("dead_until", 0) if target_data else 0
-    
+    REVIVE_COST = 500
+
+    # ✅ Already Alive
     if time.time() > dead_until:
-        return await message.reply_text(f"🏥 {smallcaps(target_name)} is already **alive and healthy**! No need to revive.")
-        
-    # Deduct money from buyer and revive target
-    await game_db.update_one({"user_id": buyer_id}, {"$inc": {"points": -REVIVE_COST}})
-    await game_db.update_one({"user_id": target_id}, {"$set": {"dead_until": 0}})
-    
-    text = f"✨ **{smallcaps('Revival Magic Used!')}** ✨\n\n"
-    if buyer_id == target_id:
-        text += f"👤 {message.from_user.mention} spent **${REVIVE_COST}** to revive themselves!"
-    else:
-        text += f"👤 {message.from_user.mention} spent **${REVIVE_COST}** and revived {target_user.mention} from the dead!"
-        
-    await message.reply_text(text)
+        return await message.reply_text(
+            f"✅ {smallcaps(user.first_name)} Iꜱ Aʟʀᴇᴀᴅʏ Aʟɪᴠᴇ."
+        )
+
+    # 💸 Not Enough Money
+    if balance < REVIVE_COST:
+        return await message.reply_text(
+            f"💸 Yᴏᴜ Nᴇᴇᴅ ${REVIVE_COST} Tᴏ Rᴇᴠɪᴠᴇ, Bᴜᴛ Yᴏᴜ Hᴀᴠᴇ Oɴʟʏ ${balance}"
+        )
+
+    # ❤️ Successful Revive
+    await game_db.update_one(
+        {"user_id": user_id},
+        {"$inc": {"points": -REVIVE_COST}, "$set": {"dead_until": 0}},
+        upsert=True
+    )
+
+    await message.reply_text(
+        f"❤️ Yᴏᴜ Rᴇᴠɪᴠᴇᴅ Yᴏᴜʀꜱᴇʟꜰ. -${REVIVE_COST}"
+    )
 
 # ==========================================
 #              PROTECT SYSTEM
@@ -317,9 +385,7 @@ async def rob_or_kill_user(client, message: Message):
         return await message.reply_text(f"🛡️ {smallcaps(target_user.first_name)} is currently protected by a magical shield!")
         
     target_bal = target_data.get("points", 0) if target_data else 0
-    if target_bal <= 0:
-        return await message.reply_text(f"⚠️ {smallcaps(target_user.first_name)} is already broke ($0)!")
-
+    
     amount_to_rob = 0
     
     if cmd == "rob":
