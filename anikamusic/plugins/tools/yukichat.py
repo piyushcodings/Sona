@@ -65,7 +65,8 @@ async def get_yuki_settings():
             "prompt": default_prompt, 
             "stickers": [], 
             "gifs": [],
-            "custom_emojis": []
+            "custom_emojis": [],
+            "model": "llama-3.3-70b-versatile"
         }
         await yuki_db.insert_one(settings)
     return settings
@@ -92,9 +93,10 @@ async def is_interesting_message(text, api_key):
         "Reply ONLY with YES or NO.\n\n"
         f"Message: {text}"
     )
-
+    settings = await get_yuki_settings()
+    model_name = settings.get("model", "llama-3.3-70b-versatile")
     payload = {
-        "model": "llama-3.3-70b-versatile",
+        "model": model_name,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0,
         "max_tokens": 5
@@ -185,6 +187,7 @@ async def yuki_panel_command(client, message: Message):
         [InlineKeyboardButton("🖼 Add Sticker", callback_data="yk_stk_add"), InlineKeyboardButton("🗑 Clear Stickers", callback_data="yk_stk_rem")],
         [InlineKeyboardButton("🎞 Add GIF", callback_data="yk_gif_add"), InlineKeyboardButton("🗑 Clear GIFs", callback_data="yk_gif_rem")],
         [InlineKeyboardButton("✨ Add Emoji", callback_data="yk_emoji_add"), InlineKeyboardButton("🗑 Clear Emojis", callback_data="yk_emoji_rem")],
+        [InlineKeyboardButton("🧠 Change Model", callback_data="yk_model_set")],
         [InlineKeyboardButton("❌ Close Panel", callback_data="yk_close")]
     ]
     await message.reply_text(text, reply_markup=InlineKeyboardMarkup(buttons))
@@ -203,7 +206,16 @@ async def yuki_panel_callback(client, query: CallbackQuery):
         owner_states[user_id] = "api_key"
         await query.answer()
         await query.message.reply_text("Send me the new Groq API Key now.\nType /cancel to abort.")
-        
+    elif action == "yk_model_set":
+        owner_states[user_id] = "model"
+        await query.answer()
+        await query.message.reply_text(
+        "Send model name.\n\nExample:\n"
+        "llama-3.3-70b-versatile\n"
+        "meta-llama/llama-4-scout-17b-16e-instruct\n"
+        "llama-3.1-8b-instant\n\n"
+        "Type /cancel to abort."
+    )   
     elif action == "yk_api_rem":
         await update_yuki_setting("api_key", "")
         await query.answer("API Key Removed!", show_alert=True)
