@@ -77,7 +77,40 @@ def generate_system_message(raw_prompt):
     current_time = datetime.now().strftime("%I:%M %p, %A, %d %B %Y")
     final_prompt = raw_prompt.replace("[Dynamic Time]", current_time)
     return {"role": "system", "content": final_prompt}
+async def is_interesting_message(text, api_key):
+    if not api_key or not text:
+        return False
 
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+
+    prompt = (
+        "Decide if this message is interesting enough for a girl to reply in a group.\n"
+        "Reply ONLY with YES or NO.\n\n"
+        f"Message: {text}"
+    )
+
+    payload = {
+        "model": "llama-3.3-70b-versatile",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0,
+        "max_tokens": 5
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json=payload) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    reply = data['choices'][0]['message']['content'].strip().lower()
+                    return "yes" in reply
+    except:
+        return False
+
+    return False
 # ─────────────────────────────
 # GROQ API FUNCTION
 # ─────────────────────────────
@@ -282,77 +315,98 @@ async def owner_state_handler(client, message: Message):
 # ─────────────────────────────
 @app.on_message((filters.text | filters.sticker) & ~filters.bot, group=2)
 async def yuki_main_chat(client, message: Message):
+
     # Ignore commands
     if message.text and message.text.startswith(('/', '.', '!', '?')):
         return
 
     bot_id = (await client.get_me()).id
     is_dm = message.chat.type.name == "PRIVATE"
-    
+
     text_lower = message.text.lower() if message.text else ""
-    is_mentioned = "yuki" in text_lower or (message.text and f"@{app.username}" in message.text)
+
+    # ✅ SONA TRIGGER (only detection, NOT replacing msg)
+    sona_trigger = any(word in text_lower for word in [
+        "sona", "shona", "sona ji", "sona baby"
+    ])
+
+    # ✅ Tag / reply
+    is_tagged = message.text and f"@{app.username}" in message.text
     is_reply_to_bot = message.reply_to_message and message.reply_to_message.from_user.id == bot_id
-    
-    # Trigger logic: Always in DM OR (Mentioned/Replied/Yuki in group)
-    if not (is_dm or is_mentioned or is_reply_to_bot):
+
+    settings = await get_yuki_settings()
+    api_key = settings.get("api_key")
+
+    # ✅ AI INTEREST CHECK (with limit)
+    ai_interest = False
+    if message.chat.type.name != "PRIVATE" and message.text:
+        if random.randint(1, 100) <= 30:  # only 30% checks
+            ai_interest = await is_interesting_message(message.text, api_key)
+
+    # ✅ FINAL TRIGGER
+    if not (is_dm or sona_trigger or is_tagged or is_reply_to_bot or ai_interest):
         return
 
     await client.send_chat_action(message.chat.id, ChatAction.TYPING)
-    
-    user_id = message.from_user.id
-    settings = await get_yuki_settings()
 
-    # --- STICKER STREAK LOGIC ---
+    user_id = message.from_user.id
+
+    # ───────── STICKER LOGIC ─────────
     if message.sticker:
         streak = sticker_streak.get(user_id, 0) + 1
         sticker_streak[user_id] = streak
-        
+
         if streak > 5:
-            await message.reply("Baat bhi kar lo yaar, bas sticker kitna kheloge? 🙄")
-            sticker_streak[user_id] = 0 # Reset taaki baad mein fir sticker bhej sake
+            await message.reply("Baat bhi kar lo yaar, bas sticker hi bhejte rahoge? 🙄")
+            sticker_streak[user_id] = 0
             return
-            
+
         stk_list = settings.get("stickers", [])
         if stk_list:
             await message.reply_sticker(random.choice(stk_list))
         else:
-            await message.reply("Gw ne abhi tak mere stickers add nahi kiye! 😅")
+            await message.reply("Mere paas abhi stickers nahi hai 😅")
         return
     else:
-        # Reset streak if user sends text
         sticker_streak[user_id] = 0
 
-    # --- TEXT LOGIC ---
+    # ───────── CHAT HISTORY ─────────
     if user_id not in chat_history:
         chat_history[user_id] = []
 
+    # ✅ FULL ORIGINAL MESSAGE GOES TO AI
     user_input = message.text.replace(f"@{app.username}", "").strip()
+
     chat_history[user_id].append({"role": "user", "content": user_input})
-    
     history_to_send = chat_history[user_id][-8:]
-    api_key = settings.get("api_key")
+
     raw_prompt = settings.get("prompt")
-    
-    # Generate Payload
-    messages_payload = [generate_system_message(raw_prompt)] + [{"role": msg["role"], "content": msg["content"]} for msg in history_to_send]
+
+    messages_payload = [
+        generate_system_message(raw_prompt)
+    ] + [
+        {"role": msg["role"], "content": msg["content"]}
+        for msg in history_to_send
+    ]
 
     yuki_reply = await get_groq_response(messages_payload, api_key)
     chat_history[user_id].append({"role": "assistant", "content": yuki_reply})
 
-    # Add Custom Emojis to the end of the text
+    # ───────── EMOJIS ─────────
     custom_emojis_list = settings.get("custom_emojis", [])
-    if not custom_emojis_list: 
+    if not custom_emojis_list:
         custom_emojis_list = DEFAULT_EMOJIS
 
     num_emojis = random.randint(1, 2)
     chosen_emojis = "".join(random.sample(custom_emojis_list, k=min(num_emojis, len(custom_emojis_list))))
+
     final_reply = f"{yuki_reply} {chosen_emojis}"
 
-    # Random Heart Reaction (20% chance)
-    if random.choice([True, False, False, False, False]):
-        try: await message.react(emoji="❤")
-        except: pass
+    # ❤️ Random reaction
+    if random.choice([True, False, False, False]):
+        try:
+            await message.react(emoji="❤")
+        except:
+            pass
 
-    # Finally send the text reply with emojis
     await message.reply(final_reply, parse_mode=ParseMode.HTML)
-        
