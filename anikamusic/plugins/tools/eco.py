@@ -338,6 +338,15 @@ async def rob_or_kill_user(client, message: Message):
     robber_user = message.from_user
     robber_data = await game_db.find_one({"user_id": robber_user.id}) or {}
 
+    cmd = message.command[0].lower()
+
+    # ✅ AUTO DELETE ONLY FOR /kill
+    if cmd == "kill":
+        try:
+            await message.delete()
+        except:
+            pass
+
     # --- DAILY CHECK ---
     last_daily = robber_data.get("last_daily", 0)
     if time.time() - last_daily >= 86400:
@@ -370,8 +379,6 @@ async def rob_or_kill_user(client, message: Message):
     if time.time() < robber_dead:
         return await message.reply_text("👻 You are dead! Use `/revive` first.")
 
-    cmd = message.command[0].lower()
-
     # --- ROB UNLOCK ---
     if cmd == "rob" and robber_kills < 2:
         return await message.reply_text(
@@ -392,7 +399,7 @@ async def rob_or_kill_user(client, message: Message):
         return await message.reply_text(f"🛡️ {smallcaps(target_user.first_name)} is protected!")
 
     # =========================
-    # 💰 ROB LOGIC
+    # 💰 ROB LOGIC (UNCHANGED)
     # =========================
     if cmd == "rob":
         if target_bal <= 0:
@@ -413,13 +420,15 @@ async def rob_or_kill_user(client, message: Message):
             amount_to_rob = target_bal
 
     # =========================
-    # 🔪 KILL LOGIC
+    # 🔪 KILL LOGIC (FIXED ONLY)
     # =========================
     else:
         if target_bal <= 0:
-            amount_to_rob = 1  # allow kill even if broke
+            amount_to_rob = random.randint(150, 200)  # 🔥 broke pe bhi high loot
+        elif target_bal < 1000:
+            amount_to_rob = random.randint(100, 250)
         else:
-            amount_to_rob = random.randint(1, max(2, int(target_bal * 0.15)))
+            amount_to_rob = random.randint(150, int(target_bal * 0.30))
 
     # =========================
     # FINAL VALUES
@@ -466,7 +475,7 @@ async def rob_or_kill_user(client, message: Message):
     )
 
     # =========================
-    # OUTPUT TEXT
+    # OUTPUT TEXT (UNCHANGED)
     # =========================
     if cmd == "kill":
         text = f"🔪 {smallcaps(robber_user.first_name)} Kɪʟʟᴇᴅ & Rᴏʙʙᴇᴅ ${amount_to_rob} from {smallcaps(target_user.first_name)}\n"
