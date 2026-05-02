@@ -96,7 +96,7 @@ async def is_interesting_message(text, api_key):
     settings = await get_yuki_settings()
     model_name = settings.get("model", "llama-3.3-70b-versatile")
     payload = {
-        "model": model_name,
+        "model": "llama-3.3-70b-versatile",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0,
         "max_tokens": 5
@@ -121,9 +121,10 @@ async def get_groq_response(messages_list, api_key):
         return "Gw boss ne abhi tak meri API key set nahi ki hai! 😅"
         
     url = "https://api.groq.com/openai/v1/chat/completions"
+    model_name = settings.get("model", "llama-3.3-70b-versatile")
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     payload = {
-        "model": "llama-3.3-70b-versatile",
+        "model": model_name,
         "messages": messages_list,
         "temperature": 0.8,
         "max_tokens": 512
