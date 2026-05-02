@@ -170,13 +170,14 @@ async def yuki_panel_command(client, message: Message):
     stk_count = len(settings.get("stickers", []))
     gif_count = len(settings.get("gifs", []))
     emoji_count = len(settings.get("custom_emojis", []))
-    
+    model_name = settings.get("model", "Not Set")
     text = (
         "👑 **Yuki AI Control Panel** 👑\n\n"
         f"🔑 **Groq API Key:** {key_status}\n"
         f"🎭 **System Prompt:** Set\n"
         f"🖼 **Saved Stickers:** {stk_count}\n"
         f"🎞 **Saved GIFs:** {gif_count}\n"
+        f"🧠 **Model:** {model_name}\n"
         f"✨ **Custom Emojis:** {emoji_count}\n\n"
         "Manage Yuki's brain from below:"
     )
@@ -301,7 +302,14 @@ async def owner_state_handler(client, message: Message):
         del owner_states[user_id]
         await message.reply(f"✅ GIF added! Total GIFs: {len(gif_list)}")
         message.stop_propagation()
+    elif state == "model":
+        if not message.text:
+            return await message.reply("Please send model name as text.")
         
+        await update_yuki_setting("model", message.text.strip())
+        del owner_states[user_id]
+        await message.reply(f"✅ Model updated to: {message.text.strip()}")
+        message.stop_propagation()    
     elif state == "custom_emoji":
         if not message.text: return await message.reply("Please send the emoji as text.")
         emoji_list = settings.get("custom_emojis", [])
