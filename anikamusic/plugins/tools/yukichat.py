@@ -121,13 +121,14 @@ async def get_groq_response(messages_list, api_key):
         return "Gw boss ne abhi tak meri API key set nahi ki hai! 😅"
         
     url = "https://api.groq.com/openai/v1/chat/completions"
+    settings = await get_yuki_settings()
     model_name = settings.get("model", "llama-3.3-70b-versatile")
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     payload = {
         "model": model_name,
         "messages": messages_list,
-        "temperature": 0.8,
-        "max_tokens": 512
+        "temperature": 0.7,
+        "max_tokens": 150
     }
     
     try:
