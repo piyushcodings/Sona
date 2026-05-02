@@ -367,7 +367,7 @@ async def rob_or_kill_user(client, message: Message):
     if target_user.is_bot:
         return await message.reply_text("⚠️ You can't attack bots!")
 
-    # --- COOLDOWN (ANTI-SPAM) ---
+    # --- COOLDOWN ---
     last_attack = robber_data.get("last_attack", 0)
     if time.time() - last_attack < 30:
         return await message.reply_text("⏳ Wait 30s before attacking again!")
@@ -392,14 +392,16 @@ async def rob_or_kill_user(client, message: Message):
     target_dead = target_data.get("dead_until", 0)
     target_bal = target_data.get("points", 0)
 
+    # ❌ kill on dead blocked | ✅ rob allowed
     if time.time() < target_dead:
-        return await message.reply_text(f"💀 {smallcaps(target_user.first_name)} is already dead!")
+        if cmd == "kill":
+            return await message.reply_text(f"💀 {smallcaps(target_user.first_name)} is already dead!")
 
     if time.time() < target_prot:
         return await message.reply_text(f"🛡️ {smallcaps(target_user.first_name)} is protected!")
 
     # =========================
-    # 💰 ROB LOGIC (UNCHANGED)
+    # 💰 ROB LOGIC
     # =========================
     if cmd == "rob":
         if target_bal <= 0:
@@ -416,15 +418,14 @@ async def rob_or_kill_user(client, message: Message):
         if amount_to_rob <= 0:
             return await message.reply_text("⚠️ Amount must be > 0")
 
-        if amount_to_rob > target_bal:
-            amount_to_rob = target_bal
+        amount_to_rob = min(amount_to_rob, target_bal)
 
     # =========================
-    # 🔪 KILL LOGIC (FIXED ONLY)
+    # 🔪 KILL LOGIC
     # =========================
     else:
         if target_bal <= 0:
-            amount_to_rob = random.randint(150, 200)  # 🔥 broke pe bhi high loot
+            amount_to_rob = random.randint(150, 200)
         elif target_bal < 1000:
             amount_to_rob = random.randint(100, 250)
         else:
@@ -435,19 +436,20 @@ async def rob_or_kill_user(client, message: Message):
     # =========================
     total_gained = amount_to_rob
     xp_gained = 15
-    death_timer = time.time() + 420  # 7 min
+    death_timer = time.time() + 420
 
     # --- UPDATE TARGET ---
     if cmd == "kill":
+        # ❌ no deduction
         await game_db.update_one(
             {"user_id": target_user.id},
             {
-                "$inc": {"points": -amount_to_rob},
                 "$set": {"dead_until": death_timer, "name": target_user.first_name}
             },
             upsert=True
         )
     else:
+        # ✅ rob deducts
         await game_db.update_one(
             {"user_id": target_user.id},
             {
@@ -475,13 +477,16 @@ async def rob_or_kill_user(client, message: Message):
     )
 
     # =========================
-    # OUTPUT TEXT (UNCHANGED)
+    # OUTPUT TEXT (SAME STYLE)
     # =========================
     if cmd == "kill":
         text = f"🔪 {smallcaps(robber_user.first_name)} Kɪʟʟᴇᴅ & Rᴏʙʙᴇᴅ ${amount_to_rob} from {smallcaps(target_user.first_name)}\n"
         text += f"💀 {smallcaps(target_user.first_name)} is dead for 7 min\n"
     else:
-        text = f"🥷 {smallcaps(robber_user.first_name)} Rᴏʙʙᴇᴅ ${amount_to_rob} from {smallcaps(target_user.first_name)}\n"
+        if time.time() < target_dead:
+            text = f"☠️ {smallcaps(robber_user.first_name)} Lᴏᴏᴛᴇᴅ Dᴇᴀᴅ Bᴏᴅʏ ${amount_to_rob} from {smallcaps(target_user.first_name)}\n"
+        else:
+            text = f"🥷 {smallcaps(robber_user.first_name)} Rᴏʙʙᴇᴅ ${amount_to_rob} from {smallcaps(target_user.first_name)}\n"
 
     text += f"💰 +${total_gained} | +{xp_gained} XP"
 
