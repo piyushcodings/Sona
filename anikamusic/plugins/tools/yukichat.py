@@ -489,9 +489,11 @@ Use their name sometimes.
 
     # ✅ FULL ORIGINAL MESSAGE GOES TO AI
     user_input = message.text.replace(f"@{app.username}", "").strip()
-
     chat_history[user_id].append({"role": "user", "content": user_input})
-    history_to_send = chat_history[user_id][-8:]
+
+    if len(chat_history[user_id]) > 20:
+        chat_history[user_id] = chat_history[user_id][-10:]
+        history_to_send = chat_history[user_id][-8:]
 
     raw_prompt = settings.get("prompt")
     await update_user_profile(
