@@ -8,6 +8,7 @@ import config
 from anikamusic import LOGGER, app, userbot
 from anikamusic.core.call import ANIKA
 from anikamusic.misc import sudo
+from anikamusic.plugins.tools.yukichat import inactive_user_pinger
 from anikamusic.plugins import ALL_MODULES
 from anikamusic.utils.database import get_banned_users, get_gbanned
 from config import BANNED_USERS
@@ -34,6 +35,7 @@ async def init():
     except:
         pass
     await app.start()
+    asyncio.create_task(inactive_user_pinger())
     for all_module in ALL_MODULES:
         importlib.import_module("anikamusic.plugins" + all_module)
     LOGGER("anikamusic.plugins").info("𝐀𝐥𝐥 𝐅𝐞𝐚𝐭𝐮𝐫𝐞𝐬 𝐋𝐨𝐚𝐝𝐞𝐝 𝐁𝐚𝐛𝐲🥳...")
