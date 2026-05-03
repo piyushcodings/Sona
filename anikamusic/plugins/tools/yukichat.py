@@ -419,7 +419,7 @@ async def yuki_main_chat(client, message: Message):
     
     text_lower = message.text.lower() if message.text else ""
 
-    # ✅ SONA TRIGGER (only detection, NOT replacing msg)
+    # ✅ SONA TRIGGER
     sona_trigger = any(word in text_lower for word in [
         "sona", "shona", "sona ji", "sona baby"
     ])
@@ -431,10 +431,10 @@ async def yuki_main_chat(client, message: Message):
     settings = await get_yuki_settings()
     api_key = settings.get("api_key")
 
-    # ✅ AI INTEREST CHECK (with limit)
+    # ✅ AI INTEREST CHECK
     ai_interest = False
     if message.chat.type.name != "PRIVATE" and message.text:
-        if random.randint(1, 100) <= 30:  # only 30% checks
+        if random.randint(1, 100) <= 30:
             ai_interest = await is_interesting_message(message.text, api_key)
 
     # ✅ FINAL TRIGGER
@@ -452,9 +452,10 @@ async def yuki_main_chat(client, message: Message):
         past_msgs = profile.get("memory", [])
         if past_msgs:
             memory_text = "\n".join([
-    f"{m['role']}: {m['content']}"
-    for m in past_msgs[-5:]
-])
+                f"{m['role']}: {m['content']}"
+                for m in past_msgs[-5:]
+            ])
+
     extra_context = f"""
 User Name: {user_name}
 
@@ -464,6 +465,7 @@ Past Conversations:
 You remember this user and talk accordingly.
 Use their name sometimes.
 """
+
     # ───────── STICKER LOGIC ─────────
     if message.sticker:
         streak = sticker_streak.get(user_id, 0) + 1
@@ -487,20 +489,30 @@ Use their name sometimes.
     if user_id not in chat_history:
         chat_history[user_id] = []
 
-    # ✅ FULL ORIGINAL MESSAGE GOES TO AI
     user_input = message.text.replace(f"@{app.username}", "").strip()
     chat_history[user_id].append({"role": "user", "content": user_input})
 
+    # ✅ FIXED memory cleanup
     if len(chat_history[user_id]) > 20:
         chat_history[user_id] = chat_history[user_id][-10:]
-        history_to_send = chat_history[user_id][-8:]
+
+    # ✅ FIXED always define
+    history_to_send = chat_history[user_id][-8:]
+
+    # ✅ SMART DB SAVE (no spam)
+    if (
+        len(user_input) > 5 and
+        not user_input.lower().startswith(("hi", "ok", "hmm")) and
+        "http" not in user_input
+    ):
+        await update_user_profile(
+            user_id,
+            user_name,
+            {"role": "user", "content": user_input}
+        )
 
     raw_prompt = settings.get("prompt")
-    await update_user_profile(
-        user_id,
-        user_name,
-        {"role": "user", "content": user_input}
-        )
+
     messages_payload = [
         generate_system_message(raw_prompt + extra_context)
     ] + [
@@ -517,7 +529,9 @@ Use their name sometimes.
         custom_emojis_list = DEFAULT_EMOJIS
 
     num_emojis = random.randint(1, 2)
-    chosen_emojis = "".join(random.sample(custom_emojis_list, k=min(num_emojis, len(custom_emojis_list))))
+    chosen_emojis = "".join(
+        random.sample(custom_emojis_list, k=min(num_emojis, len(custom_emojis_list)))
+    )
 
     final_reply = f"{yuki_reply} {chosen_emojis}"
 
