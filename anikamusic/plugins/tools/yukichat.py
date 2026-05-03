@@ -15,7 +15,7 @@ from anikamusic.misc import mongodb
 # YUKI AI DATABASE & MEMORY
 # ─────────────────────────────
 yuki_db = mongodb["yuki_ai_settings"]
-
+user_profiles = mongodb["yuki_user_profiles"]
 chat_history = {}
 owner_states = {} 
 sticker_streak = {} # Tracks how many consecutive stickers a user sent
@@ -73,7 +73,49 @@ async def get_yuki_settings():
 
 async def update_yuki_setting(key, value):
     await yuki_db.update_one({"_id": "settings"}, {"$set": {key: value}}, upsert=True)
+async def update_user_profile(user_id, name, message):
+    try:
+        # ❌ safety check
+        if not message or "content" not in message:
+            return
 
+        content = message.get("content", "").strip()
+
+        # ❌ skip useless messages
+        if (
+            len(content) < 5 or
+            content.lower().startswith(("hi", "ok", "hmm")) or
+            "http" in content
+        ):
+            return
+
+        await user_profiles.update_one(
+            {"_id": user_id},
+            {
+                "$set": {
+                    "name": name,
+                    "last_seen": datetime.now()
+                },
+                "$push": {
+                    "memory": {
+                        "$each": [{
+                            "role": message.get("role", "user"),
+                            "content": content,
+                            "time": datetime.now()
+                        }],
+                        "$slice": -10  # 🔥 max 10 msgs only
+                    }
+                }
+            },
+            upsert=True
+        )
+
+    except Exception as e:
+        print(f"Profile Update Error: {e}")
+
+
+async def get_user_profile(user_id):
+    return await user_profiles.find_one({"_id": user_id})
 def generate_system_message(raw_prompt):
     current_time = datetime.now().strftime("%I:%M %p, %A, %d %B %Y")
     final_prompt = raw_prompt.replace("[Dynamic Time]", current_time)
@@ -330,8 +372,38 @@ async def owner_state_handler(client, message: Message):
         del owner_states[user_id]
         await message.reply(f"✅ Custom Emoji added! Total Emojis: {len(emoji_list)}")
         message.stop_propagation()
+# ─────────────────────────────
+# INACTIVE USERS (SONA)
+# ─────────────────────────────
+async def inactive_user_pinger():
+    while True:
+        try:
+            cutoff = datetime.now().timestamp() - 86400  # 24h
 
+            users = user_profiles.find({
+                "last_seen": {"$lt": datetime.fromtimestamp(cutoff)}
+            })
 
+            async for user in users:
+                try:
+                    await app.send_message(
+                        user["_id"],
+                        f"{user.get('name','tum')}... yaad nahi karti kya mujhe? miss uh 🥺"
+                    )
+
+                    # update last_seen so spam na ho
+                    await user_profiles.update_one(
+                        {"_id": user["_id"]},
+                        {"$set": {"last_seen": datetime.now()}}
+                    )
+
+                except:
+                    pass
+
+        except Exception as e:
+            print("Pinger error:", e)
+
+        await asyncio.sleep(10800)  # 🔥 every 3 hours
 # ─────────────────────────────
 # MAIN AI CHAT LOGIC (YUKI)
 # ─────────────────────────────
@@ -344,7 +416,7 @@ async def yuki_main_chat(client, message: Message):
 
     bot_id = (await client.get_me()).id
     is_dm = message.chat.type.name == "PRIVATE"
-
+    
     text_lower = message.text.lower() if message.text else ""
 
     # ✅ SONA TRIGGER (only detection, NOT replacing msg)
@@ -372,7 +444,26 @@ async def yuki_main_chat(client, message: Message):
     await client.send_chat_action(message.chat.id, ChatAction.TYPING)
 
     user_id = message.from_user.id
+    profile = await get_user_profile(user_id)
+    user_name = message.from_user.first_name
+    memory_text = ""
 
+    if profile:
+        past_msgs = profile.get("memory", [])
+        if past_msgs:
+            memory_text = "\n".join([
+    f"{m['role']}: {m['content']}"
+    for m in past_msgs[-5:]
+])
+    extra_context = f"""
+User Name: {user_name}
+
+Past Conversations:
+{memory_text}
+
+You remember this user and talk accordingly.
+Use their name sometimes.
+"""
     # ───────── STICKER LOGIC ─────────
     if message.sticker:
         streak = sticker_streak.get(user_id, 0) + 1
@@ -403,9 +494,13 @@ async def yuki_main_chat(client, message: Message):
     history_to_send = chat_history[user_id][-8:]
 
     raw_prompt = settings.get("prompt")
-
+    await update_user_profile(
+        user_id,
+        user_name,
+        {"role": "user", "content": user_input}
+        )
     messages_payload = [
-        generate_system_message(raw_prompt)
+        generate_system_message(raw_prompt + extra_context)
     ] + [
         {"role": msg["role"], "content": msg["content"]}
         for msg in history_to_send
